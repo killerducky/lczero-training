@@ -307,10 +307,34 @@ input_size = num_channels*64
 output_size = 1858
 fc_hack = False
 
+def aolsen_print_gammas_one(net, layer):
+    denormed = net.get_denorm_layer(layer.bn_gammas)
+    id = np.argmax(denormed)
+    print(" %3d %5.5f %3d %5.5f" % (id, denormed[id], 33, denormed[33]), end="")
+    denormed = net.get_denorm_layer(layer.bn_stddivs)
+    id = np.argmin(denormed)
+    print(" %3d %5.5f %3d %5.5f" % (id, denormed[id], 33, denormed[33]), end="")
+    print()
+
+def aolsen_print_gammas(net):
+    print('aolsen_print_gammas')
+    #  L  max gamma   33 gamma     min stddiv 33 stddiv
+    #  0  21 1.72023  33 0.74712   4 0.00347  33 0.00898
+    print("  L  max gamma   33 gamma     min stddiv 33 stddiv")
+    _ = net.get_weights()
+    for e, res in enumerate(net.pb.weights.residual):
+        print("%3d" % (e), end="")
+        aolsen_print_gammas_one(net, res.conv1)
+        print("%3d" % (e), end="")
+        aolsen_print_gammas_one(net, res.conv2)
+    print("  P", end="")
+    aolsen_print_gammas_one(net, net.pb.weights.policy)
+    raise
+
 def aolsen_hack(net):
     print('aolsen hack')
     net.print_networkformat()
-    these_ = net.get_weights()
+    _ = net.get_weights()
 
     #print('aolsen get_weights done, len:', len(net.weights))
     #print('gwa:', net.get_weight_amounts())
@@ -370,6 +394,7 @@ def main(argv):
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
+        aolsen_print_gammas(net)
         aolsen_hack(net)
 
         net.save_txt(argv.output)
