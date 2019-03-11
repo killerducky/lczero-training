@@ -236,7 +236,11 @@ class Net:
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
         # aolsen !!!
+        # Populate policyFormat and valueFormat fields in old protobufs
+        # without these fields.
         self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
+        self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+        self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
 
     def parse_txt(self, filename):
         weights = []
@@ -329,7 +333,6 @@ def aolsen_print_gammas(net):
         aolsen_print_gammas_one(net, res.conv2)
     print("  P", end="")
     aolsen_print_gammas_one(net, net.pb.weights.policy)
-    raise
 
 def aolsen_hack(net):
     print('aolsen hack')
@@ -349,6 +352,7 @@ def aolsen_hack(net):
         print('ipb hacked: %f %f' % (net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
     #for i in range(5):
     #  print("i:%d w[i]:%f" % (i, net.weights[ipw_layer][i]))
+    denormed_ipw = net.get_denorm_layer(net.pb.weights.ip_pol_w)
     for channel in range(num_channels):
         for rank in range(8):
             for fil in range(8):
@@ -356,9 +360,10 @@ def aolsen_hack(net):
                 for o in range(output_size):
                     if channel == 33:
                         idx = o*input_size + i
-                        #if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
+                        if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
                         net.weights[ipw_layer][idx] *= 0.5
-                        #if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
+                        denormed_ipw[idx] *= 0.5
+                        if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
                 if fc_hack:
                     idx1792 = 1792*input_size + i
                     idx1795 = 1795*input_size + i
@@ -367,6 +372,7 @@ def aolsen_hack(net):
                     net.weights[ipw_layer][idx1792] = new
                     net.weights[ipw_layer][idx1795] = new
                     print("aolsen post i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+    net.fill_layer(net.pb.weights.ip_pol_w, [denormed_ipw])
 
 def main(argv):
     # aolsen
@@ -396,8 +402,12 @@ def main(argv):
             assert argv.output.endswith('.txt.gz')
         aolsen_print_gammas(net)
         aolsen_hack(net)
+        aolsen_hack(net)
 
-        net.save_txt(argv.output)
+        if argv.output.endswith(".pb.gz"):
+            net.save_proto(argv.output)
+        else:
+            net.save_txt(argv.output)
     else:
         print('Unable to detect the network format. '
               'Filename should end in ".txt" or ".pb.gz"')
