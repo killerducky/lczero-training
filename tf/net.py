@@ -38,6 +38,12 @@ class Net:
         self.set_policyformat(value)
         self.set_valueformat(value)
 
+        self.print_networkformat()
+
+    def print_networkformat(self):
+        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
+        print("aolsen se:%s\nformat:\n%s" % (se, self.pb.format.network_format))
+
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
 
@@ -103,6 +109,12 @@ class Net:
         self.fill_layer(se_unit.w2, weights)
         self.fill_layer(se_unit.b1, weights)
         self.fill_layer(se_unit.w1, weights)
+
+    def get_denorm_layer(self, layer):
+        """Denormalize a layer from protobuf"""
+        params = np.frombuffer(layer.params, np.uint16).astype(np.float32)
+        params /= 0xffff
+        return params * (layer.max_val - layer.min_val) + layer.min_val
 
     def denorm_layer(self, layer, weights):
         """Denormalize a layer from protobuf"""
@@ -224,6 +236,8 @@ class Net:
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
+        # aolsen !!!
+        self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
 
     def parse_txt(self, filename):
         weights = []
@@ -287,9 +301,62 @@ class Net:
 
         self.fill_conv_block(self.pb.weights.input, weights, gammas)
 
+ipb_layer = 291
+ipw_layer = 290
+num_channels =  80
+input_size = num_channels*64
+output_size = 1858
+
+def aolsen_what(net, idx):
+    print("aolsen what idx,w,w %d %f %f" % (idx, net.weights[ipw_layer][idx], net.weights[ipw_layer][idx+3*input_size]))
+
+def aolsen_hack(net):
+    print('aolsen hack')
+    net.print_networkformat()
+    #aolsen_what(net, 148479)
+    these_ = net.get_weights()
+
+    #print('aolsen get_weights done, len:', len(net.weights))
+    #print('gwa:', net.get_weight_amounts())
+    #for e, layer in enumerate(net.weights):
+    #    if (len(layer) > 1800):
+    #        print("e: %d %f %f" % (e, layer[1792], layer[1795]))
+    print('ipb: %d %f %f' % (len(net.weights[ipb_layer]), net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
+    print('ipw: %d' % (len(net.weights[ipw_layer])))
+    net.weights[ipb_layer][1792] = (net.weights[ipb_layer][1792] + net.weights[ipb_layer][1795]) / 2
+    net.weights[ipb_layer][1795] = net.weights[ipb_layer][1792]
+    print('ipb hacked: %f %f' % (net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
+    #for i in range(5):
+    #  print("i:%d w[i]:%f" % (i, net.weights[ipw_layer][i]))
+    #aolsen_what(net, 148479)
+    for channel in range(num_channels):
+      for rank in range(8):
+        for fil in range(8):
+          i = channel*64+rank*8+fil;
+          idx1792 = 1792*input_size + i
+          idx1795 = 1795*input_size + i
+          #idx1792 = i*output_size + 1792
+          #idx1795 = i*output_size + 1795
+          print("aolsen pre i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+          #if idx1792 == 148479: 
+          #  print("aolsen pre i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+          #  aolsen_what(net, 148479)
+          new = float((net.weights[ipw_layer][idx1792] + net.weights[ipw_layer][idx1795]) / 2.0)
+          net.weights[ipw_layer][idx1792] = new
+          net.weights[ipw_layer][idx1795] = new
+          print("aolsen post i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+          #if idx1792 == 148479: 
+          #  print(type(new))
+          #  aolsen_what(net, 148479)
+    #aolsen_what(net, 148479)
+    #for e, row in enumerate(net.weights):
+    #    print("aolsen e, len", e, len(row))
+    #raise
 
 def main(argv):
-    net = Net(net=pb.NetworkFormat.NETWORK_CLASSICAL)
+    # aolsen
+    #net = Net(net=pb.NetworkFormat.NETWORK_CLASSICAL)
+    net = Net(net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
 
     if argv.input.endswith(".txt"):
         print('Found .txt network')
@@ -303,13 +370,19 @@ def main(argv):
         net.save_proto(argv.output)
     elif argv.input.endswith(".pb.gz"):
         print('Found .pb.gz network')
+        net.print_networkformat()
         net.parse_proto(argv.input)
+        net.print_networkformat()
         print("Blocks: {}".format(net.blocks()))
         print("Filters: {}".format(net.filters()))
         if argv.output == None:
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
+        aolsen_hack(net)
+        aolsen_hack(net)
+        #raise
+
         net.save_txt(argv.output)
     else:
         print('Unable to detect the network format. '
