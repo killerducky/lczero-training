@@ -42,7 +42,6 @@ class Net:
 
     def print_networkformat(self):
         se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
-        print("aolsen se:%s\nformat:\n%s" % (se, self.pb.format.network_format))
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
@@ -306,14 +305,11 @@ ipw_layer = 290
 num_channels =  80
 input_size = num_channels*64
 output_size = 1858
-
-def aolsen_what(net, idx):
-    print("aolsen what idx,w,w %d %f %f" % (idx, net.weights[ipw_layer][idx], net.weights[ipw_layer][idx+3*input_size]))
+fc_hack = False
 
 def aolsen_hack(net):
     print('aolsen hack')
     net.print_networkformat()
-    #aolsen_what(net, 148479)
     these_ = net.get_weights()
 
     #print('aolsen get_weights done, len:', len(net.weights))
@@ -321,37 +317,32 @@ def aolsen_hack(net):
     #for e, layer in enumerate(net.weights):
     #    if (len(layer) > 1800):
     #        print("e: %d %f %f" % (e, layer[1792], layer[1795]))
-    print('ipb: %d %f %f' % (len(net.weights[ipb_layer]), net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
-    print('ipw: %d' % (len(net.weights[ipw_layer])))
-    net.weights[ipb_layer][1792] = (net.weights[ipb_layer][1792] + net.weights[ipb_layer][1795]) / 2
-    net.weights[ipb_layer][1795] = net.weights[ipb_layer][1792]
-    print('ipb hacked: %f %f' % (net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
+    if fc_hack:
+        print('ipb: %d %f %f' % (len(net.weights[ipb_layer]), net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
+        print('ipw: %d' % (len(net.weights[ipw_layer])))
+        net.weights[ipb_layer][1792] = (net.weights[ipb_layer][1792] + net.weights[ipb_layer][1795]) / 2
+        net.weights[ipb_layer][1795] = net.weights[ipb_layer][1792]
+        print('ipb hacked: %f %f' % (net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
     #for i in range(5):
     #  print("i:%d w[i]:%f" % (i, net.weights[ipw_layer][i]))
-    #aolsen_what(net, 148479)
     for channel in range(num_channels):
-      for rank in range(8):
-        for fil in range(8):
-          i = channel*64+rank*8+fil;
-          idx1792 = 1792*input_size + i
-          idx1795 = 1795*input_size + i
-          #idx1792 = i*output_size + 1792
-          #idx1795 = i*output_size + 1795
-          print("aolsen pre i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
-          #if idx1792 == 148479: 
-          #  print("aolsen pre i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
-          #  aolsen_what(net, 148479)
-          new = float((net.weights[ipw_layer][idx1792] + net.weights[ipw_layer][idx1795]) / 2.0)
-          net.weights[ipw_layer][idx1792] = new
-          net.weights[ipw_layer][idx1795] = new
-          print("aolsen post i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
-          #if idx1792 == 148479: 
-          #  print(type(new))
-          #  aolsen_what(net, 148479)
-    #aolsen_what(net, 148479)
-    #for e, row in enumerate(net.weights):
-    #    print("aolsen e, len", e, len(row))
-    #raise
+        for rank in range(8):
+            for fil in range(8):
+                i = channel*64+rank*8+fil;
+                for o in range(output_size):
+                    if channel == 33:
+                        idx = o*input_size + i
+                        #if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
+                        net.weights[ipw_layer][idx] *= 0.5
+                        #if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
+                if fc_hack:
+                    idx1792 = 1792*input_size + i
+                    idx1795 = 1795*input_size + i
+                    print("aolsen pre  i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+                    new = float((net.weights[ipw_layer][idx1792] + net.weights[ipw_layer][idx1795]) / 2.0)
+                    net.weights[ipw_layer][idx1792] = new
+                    net.weights[ipw_layer][idx1795] = new
+                    print("aolsen post i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
 
 def main(argv):
     # aolsen
@@ -380,8 +371,6 @@ def main(argv):
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
         aolsen_hack(net)
-        aolsen_hack(net)
-        #raise
 
         net.save_txt(argv.output)
     else:
