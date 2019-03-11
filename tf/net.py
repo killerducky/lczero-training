@@ -309,7 +309,7 @@ ipw_layer = 290
 num_channels =  80
 input_size = num_channels*64
 output_size = 1858
-fc_hack = False
+gamma_hack = True
 
 def aolsen_print_gammas_one(net, layer):
     denormed = net.get_denorm_layer(layer.bn_gammas)
@@ -339,19 +339,13 @@ def aolsen_hack(net):
     net.print_networkformat()
     _ = net.get_weights()
 
-    #print('aolsen get_weights done, len:', len(net.weights))
-    #print('gwa:', net.get_weight_amounts())
-    #for e, layer in enumerate(net.weights):
-    #    if (len(layer) > 1800):
-    #        print("e: %d %f %f" % (e, layer[1792], layer[1795]))
-    if fc_hack:
-        print('ipb: %d %f %f' % (len(net.weights[ipb_layer]), net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
-        print('ipw: %d' % (len(net.weights[ipw_layer])))
-        net.weights[ipb_layer][1792] = (net.weights[ipb_layer][1792] + net.weights[ipb_layer][1795]) / 2
-        net.weights[ipb_layer][1795] = net.weights[ipb_layer][1792]
-        print('ipb hacked: %f %f' % (net.weights[ipb_layer][1792], net.weights[ipb_layer][1795]))
-    #for i in range(5):
-    #  print("i:%d w[i]:%f" % (i, net.weights[ipw_layer][i]))
+    if gamma_hack:
+        denormed_gamma = net.get_denorm_layer(net.pb.weights.policy.bn_gammas)
+        print("aolsen ", len(denormed_gamma), denormed_gamma[33])
+        denormed_gamma[33] /= 8
+        net.fill_layer(net.pb.weights.policy.bn_gammas, [denormed_gamma])
+        return
+
     denormed_ipw = net.get_denorm_layer(net.pb.weights.ip_pol_w)
     for channel in range(num_channels):
         for rank in range(8):
@@ -360,24 +354,13 @@ def aolsen_hack(net):
                 for o in range(output_size):
                     if channel == 33:
                         idx = o*input_size + i
-                        if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
-                        net.weights[ipw_layer][idx] *= 0.5
+                        #if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
                         denormed_ipw[idx] *= 0.5
-                        if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
-                if fc_hack:
-                    idx1792 = 1792*input_size + i
-                    idx1795 = 1795*input_size + i
-                    print("aolsen pre  i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
-                    new = float((net.weights[ipw_layer][idx1792] + net.weights[ipw_layer][idx1795]) / 2.0)
-                    net.weights[ipw_layer][idx1792] = new
-                    net.weights[ipw_layer][idx1795] = new
-                    print("aolsen post i,idx,w,w %d %d %f %f" % (i, idx1792, net.weights[ipw_layer][idx1792], net.weights[ipw_layer][idx1795]))
+                        #if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
     net.fill_layer(net.pb.weights.ip_pol_w, [denormed_ipw])
 
 def main(argv):
-    # aolsen
-    #net = Net(net=pb.NetworkFormat.NETWORK_CLASSICAL)
-    net = Net(net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
+    net = Net()
 
     if argv.input.endswith(".txt"):
         print('Found .txt network')
