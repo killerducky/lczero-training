@@ -3,6 +3,7 @@
 import argparse
 import gzip
 import os
+import math
 import numpy as np
 import proto.net_pb2 as pb
 
@@ -309,7 +310,6 @@ ipw_layer = 290
 num_channels =  80
 input_size = num_channels*64
 output_size = 1858
-gamma_hack = True
 
 def aolsen_print_gammas_one(net, layer):
     denormed = net.get_denorm_layer(layer.bn_gammas)
@@ -334,30 +334,46 @@ def aolsen_print_gammas(net):
     print("  P", end="")
     aolsen_print_gammas_one(net, net.pb.weights.policy)
 
+def squash(gamma, mult=None):
+    if gamma == 0: return 0
+    if mult == None:
+        mult = gamma
+    factor = mult if mult < 1 else (mult-1)/1.15+1
+    factor /= mult
+    return gamma * factor
+    #return gamma if gamma < 1 else (gamma-1)/4+1
+    #return gamma/(1+gamma/8)
+
+def aolsen_print_squash():
+    for x in range(10):
+        print("%5.5f %5.5f" % (x/10, squash(x/10)))
+    for x in range(1,5):
+        print("%5.5f %5.5f" % (x, squash(x)))
+
 def aolsen_hack(net):
     print('aolsen hack')
     net.print_networkformat()
     _ = net.get_weights()
 
-    if gamma_hack:
-        denormed_gamma = net.get_denorm_layer(net.pb.weights.policy.bn_gammas)
-        print("aolsen ", len(denormed_gamma), denormed_gamma[33])
-        denormed_gamma[33] /= 8
-        net.fill_layer(net.pb.weights.policy.bn_gammas, [denormed_gamma])
-        return
+    #denormed_gamma = net.get_denorm_layer(net.pb.weights.policy.bn_gammas)
+    #print("aolsen ", len(denormed_gamma), denormed_gamma[33])
+    #denormed_gamma[33] /= 8
+    #net.fill_layer(net.pb.weights.policy.bn_gammas, [denormed_gamma])
 
-    denormed_ipw = net.get_denorm_layer(net.pb.weights.ip_pol_w)
-    for channel in range(num_channels):
-        for rank in range(8):
-            for fil in range(8):
-                i = channel*64+rank*8+fil;
-                for o in range(output_size):
-                    if channel == 33:
-                        idx = o*input_size + i
-                        #if o == 1792: print("aolsen pre  c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
-                        denormed_ipw[idx] *= 0.5
-                        #if o == 1792: print("aolsen post c,r,f,w %d %d %d %f" % (channel, rank, fil, net.weights[ipw_layer][idx]))
-    net.fill_layer(net.pb.weights.ip_pol_w, [denormed_ipw])
+    layers = []
+    layers.append(net.pb.weights.input)
+    for e, res in enumerate(net.pb.weights.residual):
+        layers.append(res.conv1)
+        layers.append(res.conv2)
+    layers.append(net.pb.weights.policy)
+    for layer in layers:
+        gammas = net.get_denorm_layer(layer.bn_gammas)
+        stddivs = net.get_denorm_layer(layer.bn_stddivs)
+        kEpsilon = 1e-5
+        mult = gammas / np.sqrt(stddivs + kEpsilon)
+        gammas = [squash(gamma,mult) for gamma,mult in zip(gammas,mult)]
+        net.fill_layer(layer.bn_gammas, [gammas])
+
 
 def main(argv):
     net = Net()
@@ -383,9 +399,10 @@ def main(argv):
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
+        aolsen_print_squash()
         aolsen_print_gammas(net)
         aolsen_hack(net)
-        aolsen_hack(net)
+        aolsen_print_gammas(net)
 
         if argv.output.endswith(".pb.gz"):
             net.save_proto(argv.output)
