@@ -39,11 +39,6 @@ class Net:
         self.set_policyformat(value)
         self.set_valueformat(value)
 
-        self.print_networkformat()
-
-    def print_networkformat(self):
-        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
-
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
 
@@ -233,15 +228,25 @@ class Net:
 
         return blocks // ws['residual']
 
+    def print_stats(self):
+        print("Blocks: {}".format(self.blocks()))
+        print("Filters: {}".format(self.filters()))
+        print_pb_stats(self.pb)
+        print()
+
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
-        # aolsen !!!
         # Populate policyFormat and valueFormat fields in old protobufs
         # without these fields.
-        self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
-        self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-        self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+        elif self.pb.format.network_forma.network  == pb.NetworkFormat.NETWORK_CLASSICAL:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
 
     def parse_txt(self, filename):
         weights = []
@@ -305,75 +310,29 @@ class Net:
 
         self.fill_conv_block(self.pb.weights.input, weights, gammas)
 
-ipb_layer = 291
-ipw_layer = 290
-num_channels =  80
-input_size = num_channels*64
-output_size = 1858
+def print_pb_stats(obj, parent=None):
+    for descriptor in obj.DESCRIPTOR.fields:
+        value = getattr(obj, descriptor.name)
+        if descriptor.name == "weights": return
+        if descriptor.type == descriptor.TYPE_MESSAGE:
+            if descriptor.label == descriptor.LABEL_REPEATED:
+                map(print_pb_stats, value)
+            else:
+                print_pb_stats(value, obj)
+        elif descriptor.type == descriptor.TYPE_ENUM:
+            enum_name = descriptor.enum_type.values[value].name
+            print("%s: %s" % (descriptor.full_name, enum_name))
+        else:
+            print("%s: %s" % (descriptor.full_name, value))
 
-def aolsen_print_gammas_one(net, layer):
-    denormed = net.get_denorm_layer(layer.bn_gammas)
-    id = np.argmax(denormed)
-    print(" %3d %5.5f %3d %5.5f" % (id, denormed[id], 33, denormed[33]), end="")
-    denormed = net.get_denorm_layer(layer.bn_stddivs)
-    id = np.argmin(denormed)
-    print(" %3d %5.5f %3d %5.5f" % (id, denormed[id], 33, denormed[33]), end="")
-    print()
-
-def aolsen_print_gammas(net):
-    print('aolsen_print_gammas')
-    #  L  max gamma   33 gamma     min stddiv 33 stddiv
-    #  0  21 1.72023  33 0.74712   4 0.00347  33 0.00898
-    print("  L  max gamma   33 gamma     min stddiv 33 stddiv")
-    _ = net.get_weights()
-    for e, res in enumerate(net.pb.weights.residual):
-        print("%3d" % (e), end="")
-        aolsen_print_gammas_one(net, res.conv1)
-        print("%3d" % (e), end="")
-        aolsen_print_gammas_one(net, res.conv2)
-    print("  P", end="")
-    aolsen_print_gammas_one(net, net.pb.weights.policy)
-
-def squash(gamma, mult=None):
-    if gamma == 0: return 0
-    if mult == None:
-        mult = gamma
-    factor = mult if mult < 1 else (mult-1)/1.15+1
-    factor /= mult
-    return gamma * factor
-    #return gamma if gamma < 1 else (gamma-1)/4+1
-    #return gamma/(1+gamma/8)
-
-def aolsen_print_squash():
-    for x in range(10):
-        print("%5.5f %5.5f" % (x/10, squash(x/10)))
-    for x in range(1,5):
-        print("%5.5f %5.5f" % (x, squash(x)))
-
-def aolsen_hack(net):
-    print('aolsen hack')
-    net.print_networkformat()
-    _ = net.get_weights()
-
-    #denormed_gamma = net.get_denorm_layer(net.pb.weights.policy.bn_gammas)
-    #print("aolsen ", len(denormed_gamma), denormed_gamma[33])
-    #denormed_gamma[33] /= 8
-    #net.fill_layer(net.pb.weights.policy.bn_gammas, [denormed_gamma])
-
-    layers = []
-    layers.append(net.pb.weights.input)
-    for e, res in enumerate(net.pb.weights.residual):
-        layers.append(res.conv1)
-        layers.append(res.conv2)
-    layers.append(net.pb.weights.policy)
-    for layer in layers:
-        gammas = net.get_denorm_layer(layer.bn_gammas)
-        stddivs = net.get_denorm_layer(layer.bn_stddivs)
-        kEpsilon = 1e-5
-        mult = gammas / np.sqrt(stddivs + kEpsilon)
-        gammas = [squash(gamma,mult) for gamma,mult in zip(gammas,mult)]
-        net.fill_layer(layer.bn_gammas, [gammas])
-
+def policy_gamma_correct(net, argv):
+    print('Divide policy gamma channel {} by {}'.format(
+        argv.policy_gamma_channel, argv.policy_gamma_factor))
+    denormed_gamma = net.get_denorm_layer(net.pb.weights.policy.bn_gammas)
+    orig = denormed_gamma[argv.policy_gamma_channel]
+    denormed_gamma[argv.policy_gamma_channel] /= argv.policy_gamma_factor
+    print('Original: {} New: {}'.format(orig, denormed_gamma[argv.policy_gamma_channel]))
+    net.fill_layer(net.pb.weights.policy.bn_gammas, [denormed_gamma])
 
 def main(argv):
     net = Net()
@@ -381,8 +340,7 @@ def main(argv):
     if argv.input.endswith(".txt"):
         print('Found .txt network')
         net.parse_txt(argv.input)
-        print("Blocks: {}".format(net.blocks()))
-        print("Filters: {}".format(net.filters()))
+        net.print_stats()
         if argv.output == None:
             argv.output = argv.input.replace('.txt', '.pb.gz')
             assert argv.output.endswith('.pb.gz')
@@ -390,20 +348,14 @@ def main(argv):
         net.save_proto(argv.output)
     elif argv.input.endswith(".pb.gz"):
         print('Found .pb.gz network')
-        net.print_networkformat()
         net.parse_proto(argv.input)
-        net.print_networkformat()
-        print("Blocks: {}".format(net.blocks()))
-        print("Filters: {}".format(net.filters()))
+        net.print_stats()
         if argv.output == None:
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
-        aolsen_print_squash()
-        aolsen_print_gammas(net)
-        aolsen_hack(net)
-        aolsen_print_gammas(net)
-
+        if argv.policy_gamma_channel:
+            policy_gamma_correct(net, argv)
         if argv.output.endswith(".pb.gz"):
             net.save_proto(argv.output)
         else:
@@ -420,4 +372,8 @@ if __name__ == "__main__":
                            help='input network weight text file')
     argparser.add_argument('-o', '--output', type=str,
                            help='output filepath without extension')
+    argparser.add_argument('--policy_gamma_channel', type=int,
+                           help='policy channel to reduce gamma')
+    argparser.add_argument('--policy_gamma_factor', type=float,
+                           help='factor to divide gamma by')
     main(argparser.parse_args())
